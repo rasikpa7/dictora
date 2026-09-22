@@ -28,6 +28,43 @@ struct PreferencesStoreTests {
         #expect(preferences.customInstructions.isEmpty)
     }
 
+    @Test("Dictate-anywhere defaults are on, with tap-to-toggle activation")
+    func shortcutDefaults() throws {
+        let preferences = UserDefaultsPreferencesStore(defaults: try makeDefaults()).load()
+
+        #expect(preferences.globalShortcutEnabled)
+        #expect(preferences.insertTextAutomatically)
+        #expect(preferences.hotkeyActivationMode == .toggle)
+    }
+
+    @Test("Dictate-anywhere preferences round-trip")
+    func shortcutPreferencesRoundTrip() throws {
+        let defaults = try makeDefaults()
+
+        var preferences = UserPreferences()
+        preferences.globalShortcutEnabled = false
+        preferences.hotkeyActivationMode = .holdToTalk
+        preferences.insertTextAutomatically = false
+        UserDefaultsPreferencesStore(defaults: defaults).save(preferences)
+
+        let reloaded = UserDefaultsPreferencesStore(defaults: defaults).load()
+        #expect(reloaded.globalShortcutEnabled == false)
+        #expect(reloaded.hotkeyActivationMode == .holdToTalk)
+        #expect(reloaded.insertTextAutomatically == false)
+    }
+
+    @Test("Preferences saved before Phase 2 still decode, with the new keys defaulted")
+    func phaseOnePayloadStillDecodes() throws {
+        let legacy = Data(#"{"hasCompletedOnboarding":true,"selectedWritingStyle":"developer"}"#.utf8)
+        let decoded = try JSONDecoder().decode(UserPreferences.self, from: legacy)
+
+        #expect(decoded.hasCompletedOnboarding)
+        #expect(decoded.selectedWritingStyle == .developer)
+        #expect(decoded.globalShortcutEnabled)
+        #expect(decoded.hotkeyActivationMode == .toggle)
+        #expect(decoded.insertTextAutomatically)
+    }
+
     @Test("Saved preferences round-trip")
     func preferencesRoundTrip() throws {
         let defaults = try makeDefaults()

@@ -3,16 +3,14 @@ import SwiftUI
 
 @main
 struct DictoraMacApp: App {
-    @State private var environment = AppEnvironment.live()
-    @State private var platform = MacPlatformServices()
+    @State private var model = MacAppModel()
 
     var body: some Scene {
         Window("Dictora", id: DictoraWindow.main) {
             MacRootView()
-                .environment(environment)
-                .environment(platform)
+                .dictoraEnvironment(model)
                 .frame(minWidth: 520, minHeight: 600)
-                .task { await environment.bootstrap() }
+                .task { await model.start() }
         }
         .defaultSize(width: 560, height: 700)
         .windowResizability(.contentMinSize)
@@ -21,18 +19,29 @@ struct DictoraMacApp: App {
         }
 
         Settings {
-            SettingsView()
-                .environment(environment)
+            MacSettingsView()
+                .dictoraEnvironment(model)
         }
 
         MenuBarExtra {
             MenuBarContentView()
-                .environment(environment)
-                .environment(platform)
+                .dictoraEnvironment(model)
         } label: {
-            Image(systemName: platform.menuBar.symbolName(for: environment.dictation.state))
-                .accessibilityLabel(platform.menuBar.accessibilityLabel(for: environment.dictation.state))
+            Image(systemName: model.platform.menuBar.symbolName(for: model.environment.dictation.state))
+                .accessibilityLabel(
+                    model.platform.menuBar.accessibilityLabel(for: model.environment.dictation.state)
+                )
         }
+    }
+}
+
+extension View {
+    /// Injects the three objects every macOS scene needs, so scenes don't repeat
+    /// the same chain of `.environment` calls.
+    func dictoraEnvironment(_ model: MacAppModel) -> some View {
+        environment(model.environment)
+            .environment(model.platform)
+            .environment(model.coordinator)
     }
 }
 

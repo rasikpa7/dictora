@@ -46,7 +46,8 @@ final class GlobalHotkeyManager {
 
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
-    private var onTrigger: (@MainActor () -> Void)?
+    private var onPress: (@MainActor () -> Void)?
+    private var onRelease: (@MainActor () -> Void)?
 
     private let logger = Logger(subsystem: DictoraLog.subsystem, category: "GlobalHotkey")
 
@@ -60,26 +61,31 @@ final class GlobalHotkeyManager {
 
     /// Carbon resources are released in ``unregister()`` rather than `deinit`,
     /// which cannot touch main-actor state.
+    /// - Parameter onRelease: Only needed for hold-to-talk. Carbon delivers the
+    ///   release event even when the shortcut is used as a simple toggle, so
+    ///   callers that ignore it simply pass `nil`.
     @discardableResult
     func register(
         _ shortcut: HotkeyShortcut = .optionSpace,
-        onTrigger: @escaping @MainActor () -> Void
+        onPress: @escaping @MainActor () -> Void,
+        onRelease: (@MainActor () -> Void)? = nil
     ) -> RegistrationState {
         unregister()
 
         self.shortcut = shortcut
-        self.onTrigger = onTrigger
+        self.onPress = onPress
+        self.onRelease = onRelease
 
-        var eventType = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
+        var eventTypes = [
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased)),
+        ]
         var handlerRef: EventHandlerRef?
         let handlerStatus = InstallEventHandler(
             GetApplicationEventTarget(),
             dictoraHotkeyEventHandler,
-            1,
-            &eventType,
+            eventTypes.count,
+            &eventTypes,
             nil,
             &handlerRef
         )
@@ -120,12 +126,17 @@ final class GlobalHotkeyManager {
             self.eventHandlerRef = nil
         }
         Self.registry[Self.identifier] = nil
-        onTrigger = nil
+        onPress = nil
+        onRelease = nil
         state = .inactive
     }
 
-    fileprivate func handleTrigger() {
-        onTrigger?()
+    fileprivate func handlePress() {
+        onPress?()
+    }
+
+    fileprivate func handleRelease() {
+        onRelease?()
     }
 
     private func finishWithFailure(_ message: String) -> RegistrationState {
@@ -160,8 +171,14 @@ private func dictoraHotkeyEventHandler(
     guard status == noErr else { return status }
 
     let identifier = hotKeyID.id
+    let isPress = GetEventKind(event) == UInt32(kEventHotKeyPressed)
     MainActor.assumeIsolated {
-        GlobalHotkeyManager.registry[identifier]?.handleTrigger()
+        guard let manager = GlobalHotkeyManager.registry[identifier] else { return }
+        if isPress {
+            manager.handlePress()
+        } else {
+            manager.handleRelease()
+        }
     }
     return noErr
 }

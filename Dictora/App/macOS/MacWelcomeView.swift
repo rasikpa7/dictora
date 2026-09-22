@@ -3,19 +3,34 @@ import SwiftUI
 
 /// The macOS main window after onboarding.
 ///
-/// Phase 1 keeps this simple: branding, the shared dictation surface for
-/// testing inside the app, and an honest status panel describing which
-/// system-wide capabilities are still to come.
+/// Branding, the shared dictation surface for dictating inside Dictora, and a
+/// status strip describing the dictate-anywhere capability — including what is
+/// still missing, with the action needed to fix it.
 struct MacWelcomeView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(MacPlatformServices.self) private var platform
+    @Environment(SystemDictationCoordinator.self) private var coordinator
     @Environment(\.openSettings) private var openSettings
+
+    private var preferences: UserPreferences { environment.appState.preferences }
+    private var needsAccessibility: Bool {
+        preferences.globalShortcutEnabled
+            && preferences.insertTextAutomatically
+            && !platform.accessibility.access.isGranted
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
 
             Divider()
+
+            if needsAccessibility {
+                AccessibilityPrompt(
+                    onGrant: { platform.accessibility.requestAccess() },
+                    onOpenSettings: { platform.accessibility.openSystemSettings() }
+                )
+            }
 
             DictationView(showsHeader: false)
 
@@ -57,17 +72,13 @@ struct MacWelcomeView: View {
         VStack(alignment: .leading, spacing: 8) {
             CapabilityRow(
                 symbolName: "keyboard",
-                title: "Global shortcut",
-                detail: platform.hotkey.state.isActive
-                    ? "\(HotkeyShortcut.optionSpace.displayString) is registered. Triggering dictation from other apps arrives in Phase 2."
-                    : hotkeyDetail
+                title: "Dictate anywhere",
+                detail: shortcutDetail
             )
             CapabilityRow(
                 symbolName: "text.cursor",
                 title: "Insert into other apps",
-                detail: platform.accessibility.access.isGranted
-                    ? "Accessibility access granted. Insertion lands in Phase 2."
-                    : "Needs Accessibility access, and the App Sandbox must be turned off. Not enabled yet."
+                detail: insertionDetail
             )
             CapabilityRow(
                 symbolName: "sparkles",
@@ -82,9 +93,69 @@ struct MacWelcomeView: View {
         .background(.background.secondary)
     }
 
-    private var hotkeyDetail: String {
+    private var shortcutDetail: String {
+        guard preferences.globalShortcutEnabled else {
+            return "Turned off in Settings › Anywhere."
+        }
         if case .failed(let reason) = platform.hotkey.state { return reason }
-        return "Not registered yet."
+        guard platform.hotkey.state.isActive else { return "Not registered yet." }
+
+        let shortcut = HotkeyShortcut.optionSpace.displayString
+        return preferences.hotkeyActivationMode == .holdToTalk
+            ? "Hold \(shortcut) anywhere on your Mac and speak."
+            : "Press \(shortcut) anywhere on your Mac to start and stop."
+    }
+
+    private var insertionDetail: String {
+        guard preferences.insertTextAutomatically else {
+            return "Turned off — results are copied to your clipboard instead."
+        }
+        guard platform.accessibility.access.isGranted else {
+            return "Needs Accessibility access. Until then, results go to your clipboard."
+        }
+        if let outcome = coordinator.lastInsertion {
+            return outcome.detail ?? "Last result: \(outcome.summary.lowercased())."
+        }
+        return "Ready. Polished text is typed into whichever app you were using."
+    }
+}
+
+/// Shown only while the feature the user has enabled cannot actually work.
+private struct AccessibilityPrompt: View {
+    let onGrant: () -> Void
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "lock.open")
+                .font(.title3)
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("One more step to dictate anywhere")
+                    .font(.subheadline.weight(.semibold))
+                Text("Dictora needs Accessibility access to type into other apps. Without it, dictation still works — the result just lands on your clipboard.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button("Grant Access…", action: onGrant)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    Button("Open System Settings", action: onOpenSettings)
+                        .controlSize(.small)
+                }
+                .padding(.top, 2)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -117,9 +188,9 @@ private struct CapabilityRow: View {
 }
 
 #Preview {
+    let model = MacAppModel()
     MacWelcomeView()
-        .environment(AppEnvironment.preview())
-        .environment(MacPlatformServices())
+        .dictoraEnvironment(model)
         .frame(width: 560, height: 700)
 }
 #endif

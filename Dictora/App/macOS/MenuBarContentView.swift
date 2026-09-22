@@ -2,13 +2,10 @@
 import SwiftUI
 
 /// Contents of Dictora's menu bar item.
-///
-/// Intentionally minimal for Phase 1 — the interesting menu bar behaviour
-/// (dictate from anywhere, insert into the focused app) arrives with the global
-/// shortcut in Phase 2.
 struct MenuBarContentView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(MacPlatformServices.self) private var platform
+    @Environment(SystemDictationCoordinator.self) private var coordinator
 
     private var dictation: DictationManager { environment.dictation }
 
@@ -17,11 +14,17 @@ struct MenuBarContentView: View {
 
         Divider()
 
+        // Routed through the coordinator so the result is delivered back to the
+        // app the user was in before they opened this menu.
         Button(dictation.state.isCapturing ? "Stop Dictation" : "Start Dictation") {
-            Task { await dictation.toggle() }
+            coordinator.toggleFromMenuBar()
         }
         .disabled(!dictation.state.canStart && !dictation.state.isCapturing)
-        .keyboardShortcut("d", modifiers: [.command, .shift])
+
+        if environment.appState.preferences.globalShortcutEnabled,
+           platform.hotkey.state.isActive {
+            Text("Anywhere: \(HotkeyShortcut.optionSpace.displayString)")
+        }
 
         Menu("Writing Style") {
             ForEach(WritingStyle.allCases) { style in

@@ -17,6 +17,13 @@ struct UserPreferences: Codable, Equatable, Sendable {
     var showFloatingIndicator: Bool
     /// macOS only. Not wired to `SMAppService` yet — see `MacPlatformServices`.
     var launchAtLogin: Bool
+    /// macOS only. Whether Option + Space triggers dictation from any app.
+    var globalShortcutEnabled: Bool
+    /// macOS only. Tap-to-toggle versus hold-to-talk.
+    var hotkeyActivationMode: HotkeyActivationMode
+    /// macOS only. When false, shortcut-triggered results are copied to the
+    /// clipboard instead of being typed into the focused field.
+    var insertTextAutomatically: Bool
 
     init(
         hasCompletedOnboarding: Bool = false,
@@ -26,7 +33,10 @@ struct UserPreferences: Codable, Equatable, Sendable {
         transformationStrength: TransformationStrength = .default,
         playSounds: Bool = true,
         showFloatingIndicator: Bool = true,
-        launchAtLogin: Bool = false
+        launchAtLogin: Bool = false,
+        globalShortcutEnabled: Bool = true,
+        hotkeyActivationMode: HotkeyActivationMode = .default,
+        insertTextAutomatically: Bool = true
     ) {
         self.hasCompletedOnboarding = hasCompletedOnboarding
         self.selectedWritingStyle = selectedWritingStyle
@@ -36,6 +46,9 @@ struct UserPreferences: Codable, Equatable, Sendable {
         self.playSounds = playSounds
         self.showFloatingIndicator = showFloatingIndicator
         self.launchAtLogin = launchAtLogin
+        self.globalShortcutEnabled = globalShortcutEnabled
+        self.hotkeyActivationMode = hotkeyActivationMode
+        self.insertTextAutomatically = insertTextAutomatically
     }
 
     /// Decoding tolerates preferences written by an older build that lacked a key.
@@ -53,6 +66,9 @@ struct UserPreferences: Codable, Equatable, Sendable {
         playSounds = value(.playSounds, defaults.playSounds)
         showFloatingIndicator = value(.showFloatingIndicator, defaults.showFloatingIndicator)
         launchAtLogin = value(.launchAtLogin, defaults.launchAtLogin)
+        globalShortcutEnabled = value(.globalShortcutEnabled, defaults.globalShortcutEnabled)
+        hotkeyActivationMode = value(.hotkeyActivationMode, defaults.hotkeyActivationMode)
+        insertTextAutomatically = value(.insertTextAutomatically, defaults.insertTextAutomatically)
     }
 
     /// The style instruction with the user's own custom text already resolved.

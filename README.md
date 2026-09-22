@@ -44,7 +44,8 @@ stray from your original phrasing.
 Dictora/
 ├── App/
 │   ├── Shared/      DictoraAppState, AppEnvironment, DependencyContainer
-│   ├── macOS/       DictoraMacApp, MacRootView, MacWelcomeView, MenuBarContentView
+│   ├── macOS/       DictoraMacApp, MacAppModel, MacRootView, MacWelcomeView,
+│   │                MacSettingsView, MenuBarContentView
 │   └── iOS/         DictoraiOSApp, IOSRootView, IOSHomeView
 ├── Core/
 │   ├── Models/      WritingStyle, TransformationStrength, DictationState/Result/Error
@@ -58,11 +59,12 @@ Dictora/
 │   ├── Common/      WritingStyleCard, card modifiers
 │   ├── Onboarding/  5-step first-run flow
 │   ├── Dictation/   DictationView, DictationButton, TranscriptView, ProcessingIndicator
-│   └── Settings/    SettingsView + General / Writing / Privacy sections
+│   └── Settings/    General / Writing / Privacy / Shortcut sections, iOS SettingsView
 ├── Platform/
-│   ├── macOS/       MenuBarManager, GlobalHotkeyManager, AccessibilityManager,
-│   │                ActiveApplicationManager, TextInsertionManager,
-│   │                DictationOverlayController/View, MacPlatformServices
+│   ├── macOS/       SystemDictationCoordinator, MacPlatformServices,
+│   │                GlobalHotkeyManager, AccessibilityManager, TextInsertionManager,
+│   │                ActiveApplicationManager, MenuBarManager,
+│   │                DictationOverlayController/View
 │   └── iOS/         IOSIntegrationService
 ├── Resources/       Assets.xcassets, Localizable.xcstrings
 └── Configuration/   Info plists, entitlements, Shared.xcconfig
@@ -83,6 +85,10 @@ Dictora/
   injected via the SwiftUI environment. There is no shared mutable global anywhere in the app.
 - **The state machine is the manager's only job.** `DictationManager` owns `DictationState` and
   delegates each stage — capture, recognition, rewriting — to a separate service.
+- **Behaviour lives outside views when it must outlive them.** `MacPlatformServices` is a
+  container of capabilities; `SystemDictationCoordinator` is the behaviour that combines them.
+  The coordinator is owned by `MacAppModel` (the `App`), not by a view, because dictating from
+  another application has to keep working while Dictora's window is closed.
 
 ### The dictation pipeline
 
@@ -98,6 +104,27 @@ AudioCaptureService          SpeechRecognitionService        TextProcessingServi
 
 `DictationState` moves through `idle → requestingPermission → listening → transcribing →
 processing → completed`, with `failed(DictationError)` reachable from any stage.
+
+### Dictating into other apps (macOS)
+
+```
+Option + Space  →  remember the frontmost app (ActiveApplicationManager)
+                →  dictate (the pipeline above), floating overlay follows the state
+                →  TextInsertionManager:  Accessibility write
+                                          ↓ element not editable / not writable
+                                          clipboard + synthetic ⌘V, clipboard restored
+                                          ↓ no Accessibility permission
+                                          leave on clipboard and say so
+```
+
+`SystemDictationCoordinator` observes dictation state and preferences through a single
+`Observations` loop rather than SwiftUI's `onChange`, so the overlay and the shortcut
+registration stay correct with no window on screen. Changing the activation mode or toggling the
+shortcut in Settings re-registers the hotkey automatically.
+
+The target application is captured *before* dictation starts. Carbon hotkeys don't activate
+Dictora and the overlay is a non-activating panel, so the user's app normally stays frontmost;
+the coordinator only re-activates it if focus moved in the meantime.
 
 ### Text processing
 
@@ -128,10 +155,10 @@ field. Dictora does not pretend otherwise.
 | Settings + onboarding | Yes | Yes |
 | Copy / share result | Yes | Yes |
 | Menu bar app (`MenuBarExtra`) | Yes | N/A |
-| Global keyboard shortcut | Scaffolded (Option + Space registered) | Not possible |
-| Floating listening overlay | Scaffolded (`NSPanel`) | N/A |
-| Foreground-app detection | Scaffolded (`NSWorkspace`) | Not possible |
-| Insert into another app's focused field | Scaffolded (Accessibility → clipboard fallback) | **Not possible** |
+| Global keyboard shortcut | Yes — Option + Space, tap or hold | Not possible |
+| Floating listening overlay | Yes | N/A |
+| Foreground-app detection | Yes (`NSWorkspace`) | Not possible |
+| Insert into another app's focused field | Yes — Accessibility, clipboard fallback | **Not possible** |
 
 On iOS, polished text leaves Dictora only when you copy or share it. `IOSIntegrationService`
 reserves the seams for a future custom keyboard and Share Extension; neither extension exists
@@ -209,11 +236,13 @@ xcodebuild -project Dictora.xcodeproj -scheme DictoraMac \
 | --- | --- | --- | --- |
 | Microphone | Both | "Dictora uses your microphone to turn your voice into text." | Requested during onboarding |
 | Speech Recognition | Both | "Dictora uses speech recognition to transcribe your dictation." | Requested during onboarding |
-| Accessibility | macOS | Required to type into another app's focused text field | Detected and reported; not yet requested during onboarding |
+| Accessibility | macOS | Required to type into another app's focused text field | Prompted from the main window and Settings › Anywhere |
 
 Both usage descriptions live in `Dictora/Configuration/Info-macOS.plist` and `Info-iOS.plist`.
-Accessibility has no Info.plist key — macOS grants it through System Settings, and
-`AccessibilityManager` can prompt for it or deep-link to the right pane.
+Accessibility has no Info.plist key — macOS grants it through System Settings. Dictora prompts
+for it with a banner in the main window whenever automatic insertion is enabled but access is
+missing, and from Settings › Anywhere. If it is refused, dictation still works and the result is
+left on the clipboard with an explanation.
 
 ---
 
@@ -239,32 +268,35 @@ Accessibility has no Info.plist key — macOS grants it through System Settings,
   result, copy and share.
 - macOS main window and `MenuBarExtra` (status, start/stop, writing-style submenu, copy last
   result, settings, quit).
-- Shared Settings with General, Writing and Privacy sections.
-- 31 unit tests across writing styles, prompt building, preferences and the fallback processor.
+- Settings with General, Writing, Privacy and — on macOS — Anywhere sections.
+
+**Dictate anywhere on the Mac (Phase 2):**
+
+- Global Option + Space shortcut via Carbon's `RegisterEventHotKey`, reporting conflicts with
+  other apps rather than failing silently. Works with Dictora's window closed.
+- Both activation modes: tap to start and stop, or hold to talk. Switching mode in Settings
+  re-registers the shortcut automatically.
+- Floating non-activating `NSPanel` overlay following the dictation state, positioned on the
+  display the pointer is on, and reporting the delivery outcome when finished.
+- Accessibility text insertion into the focused field of the app you dictated from, checking the
+  element is actually writable before using it.
+- Clipboard + synthetic ⌘V fallback for apps with no editable Accessibility element, restoring
+  your previous clipboard contents afterwards.
+- Graceful degradation: without Accessibility permission the text is left on the clipboard with
+  an explanation, and the main window offers to request access.
+- 41 unit tests on macOS (37 on iOS, which skips the macOS-only suites).
 
 ### Scaffolded
 
-These compile, are wired into the app, and do something real — but the end-to-end feature they
-serve is not finished.
-
-- **`GlobalHotkeyManager`** — registers Option + Space via Carbon's `RegisterEventHotKey` and
-  reports success or conflict. The hotkey currently toggles in-app dictation; the
-  dictate-from-anywhere flow is Phase 2.
-- **`AccessibilityManager`** — checks, prompts for, and reports Accessibility permission.
-- **`ActiveApplicationManager`** — tracks the frontmost app and the last non-Dictora app via
-  `NSWorkspace`.
-- **`TextInsertionManager`** — Accessibility insertion with a clipboard-and-paste fallback.
-  Complete but unreachable until the global shortcut flow lands, and blocked by the App Sandbox
-  (see below).
-- **`DictationOverlayController` / `DictationOverlayView`** — a non-activating floating `NSPanel`
-  showing Listening / Processing / Done, driven by dictation state.
-- **`IOSIntegrationService`** — copy/share plus reserved identifiers for future extensions.
+- **`IOSIntegrationService`** — copy/share works; the reserved identifiers for a future keyboard
+  and Share Extension are unused.
 - **`launchAtLogin`** preference — stored, but no `SMAppService` registration yet.
 - **`Localizable.xcstrings`** — present and configured; strings are not yet extracted into it.
 
 ### Future
 
-- Dictating into other applications on macOS (needs hotkey flow + sandbox decision below).
+- Customisable shortcut (currently fixed to Option + Space).
+- Accessibility step in macOS onboarding, rather than only the in-app prompt.
 - iOS custom keyboard and Share Extension.
 - Per-application writing styles, personal dictionary, smarter developer mode.
 - Optional advanced AI providers.
@@ -278,18 +310,24 @@ serve is not finished.
    distributed. iOS uses automatic signing and needs a team before it will run on a device
    (the Simulator does not).
 
-2. **App Sandbox vs. Accessibility — the one real architectural trade-off.**
-   The macOS target ships **with the App Sandbox enabled** and exactly one entitlement,
-   `com.apple.security.device.audio-input`. Everything in Phase 1 works under the sandbox.
+2. **The App Sandbox is off on macOS, deliberately.**
+   A sandboxed app cannot use the Accessibility API on another process, so typing into another
+   app's focused field is impossible under the sandbox. Phase 2 needs that, so
+   `Dictora-macOS.entitlements` no longer requests `com.apple.security.app-sandbox`.
 
-   However, a sandboxed app **cannot** use the Accessibility API to read or write another
-   process's UI elements. `TextInsertionManager` will therefore always fall back to leaving text
-   on the clipboard while the sandbox is on.
+   Consequences you should know about:
 
-   Enabling Phase 2 insertion requires **turning the App Sandbox off** and distributing outside
-   the Mac App Store with Developer ID. That is a product decision with real security
-   consequences, so it has deliberately **not** been made for you. The sandbox was left on, and
-   the insertion code degrades honestly rather than silently failing.
+   - **Dictora cannot ship on the Mac App Store.** Distribute with Developer ID, notarised.
+   - The Hardened Runtime is still enabled, and `com.apple.security.device.audio-input` is still
+     requested — that is the only entitlement Dictora asks for. No file, network, or
+     Apple Events access is requested.
+   - Users must grant Accessibility access manually, and macOS ties that grant to the app's code
+     signature. Re-signing with a different identity resets it, so during development you may
+     need to remove and re-add Dictora in System Settings › Privacy & Security › Accessibility.
+
+   If you later decide the Mac App Store matters more than dictating into other apps, re-add
+   `com.apple.security.app-sandbox` — everything except `TextInsertionManager`'s Accessibility
+   path keeps working, and that path already degrades to the clipboard with a clear explanation.
 
 3. **App icons.** `Assets.xcassets/AppIcon.appiconset` has the correct slots but **no artwork**.
    Supply PNGs for:
@@ -311,7 +349,7 @@ serve is not finished.
 
 ## Project roadmap
 
-**Phase 1 — foundation** *(this milestone)*
+**Phase 1 — foundation** *(done)*
 - Onboarding
 - Microphone capture
 - Speech-to-text
@@ -319,7 +357,7 @@ serve is not finished.
 - Local rewriting
 - Settings
 
-**Phase 2 — dictate anywhere on macOS**
+**Phase 2 — dictate anywhere on macOS** *(this milestone)*
 - Global shortcut triggering dictation from any app
 - Floating dictation UI driven by the shortcut
 - Accessibility text insertion
@@ -344,6 +382,8 @@ xcodebuild -project Dictora.xcodeproj -scheme DictoraMac \
 ```
 
 The same `Tests/` directory is compiled into both `DictoraMacTests` and `DictoraiOSTests`, so
-shared logic is verified on both platforms. Coverage is deliberately narrow and behavioural:
-writing-style instructions, prompt construction and its safety invariants, preferences storage
-and migration, and the local fallback processor. There are no UI tests yet.
+shared logic is verified on both platforms; macOS-only suites are excluded from the iOS run with
+`#if os(macOS)`. Coverage is deliberately narrow and behavioural: writing-style instructions,
+prompt construction and its safety invariants, preferences storage and forward-compatible
+decoding of older payloads, the local fallback processor, shortcut rendering, and text-insertion
+outcomes. There are no UI tests yet.

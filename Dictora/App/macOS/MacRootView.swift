@@ -3,12 +3,11 @@ import SwiftUI
 
 /// Root of the macOS main window.
 ///
-/// Also the single place where macOS-only side effects are attached to shared
-/// state: registering the global shortcut and mirroring dictation state onto
-/// the floating overlay.
+/// Side effects that must outlive this window — the global shortcut, the
+/// floating overlay, text insertion — belong to `SystemDictationCoordinator`,
+/// which the app owns. This view only chooses what to show.
 struct MacRootView: View {
     @Environment(AppEnvironment.self) private var environment
-    @Environment(MacPlatformServices.self) private var platform
 
     var body: some View {
         Group {
@@ -19,25 +18,13 @@ struct MacRootView: View {
             }
         }
         .animation(.smooth(duration: 0.3), value: environment.appState.hasCompletedOnboarding)
-        .task {
-            platform.bootstrap {
-                Task { await environment.dictation.toggle() }
-            }
-        }
-        .onChange(of: environment.dictation.state) { _, state in
-            platform.syncOverlay(
-                with: state,
-                transcriptPreview: environment.dictation.transcript.displayText,
-                isEnabled: environment.appState.preferences.showFloatingIndicator
-            )
-        }
     }
 }
 
 #Preview {
+    let model = MacAppModel()
     MacRootView()
-        .environment(AppEnvironment.preview())
-        .environment(MacPlatformServices())
+        .dictoraEnvironment(model)
         .frame(width: 560, height: 700)
 }
 #endif
