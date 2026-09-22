@@ -1,0 +1,23 @@
+// Dictora — shared build configuration.
+//
+// Bundle identifiers are defined here (and only here) so they can be re-pointed
+// at a real organisation without touching project.yml or any target settings.
+
+DICTORA_BUNDLE_ID_BASE = com.dictora.app
+DICTORA_BUNDLE_ID_MAC = $(DICTORA_BUNDLE_ID_BASE)
+DICTORA_BUNDLE_ID_IOS = $(DICTORA_BUNDLE_ID_BASE).ios
+
+// Future extension targets should extend the base identifier, e.g.
+// DICTORA_BUNDLE_ID_IOS_KEYBOARD = $(DICTORA_BUNDLE_ID_IOS).keyboard
+
+// Both apps build a bundle called Dictora.app. Test targets derive TEST_HOST
+// from this, so it must stay in sync with PRODUCT_NAME.
+DICTORA_PRODUCT_NAME = Dictora
+DICTORA_DISPLAY_NAME = Dictora
+
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+// Leave empty for local development. Set to your Apple Developer Team ID to
+// enable automatic signing for device builds and distribution.
+DEVELOPMENT_TEAM =
