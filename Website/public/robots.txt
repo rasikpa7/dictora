@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://dictora-mac-site.web.app/sitemap.xml
