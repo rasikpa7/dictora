@@ -28,13 +28,13 @@ struct PreferencesStoreTests {
         #expect(preferences.customInstructions.isEmpty)
     }
 
-    @Test("Dictate-anywhere defaults are on, with tap-to-toggle activation")
+    @Test("Dictate-anywhere defaults are on, with hold-to-talk activation")
     func shortcutDefaults() throws {
         let preferences = UserDefaultsPreferencesStore(defaults: try makeDefaults()).load()
 
         #expect(preferences.globalShortcutEnabled)
         #expect(preferences.insertTextAutomatically)
-        #expect(preferences.hotkeyActivationMode == .toggle)
+        #expect(preferences.hotkeyActivationMode == .holdToTalk)
     }
 
     @Test("Dictate-anywhere preferences round-trip")
@@ -61,8 +61,15 @@ struct PreferencesStoreTests {
         #expect(decoded.hasCompletedOnboarding)
         #expect(decoded.selectedWritingStyle == .developer)
         #expect(decoded.globalShortcutEnabled)
-        #expect(decoded.hotkeyActivationMode == .toggle)
+        #expect(decoded.hotkeyActivationMode == .holdToTalk)
         #expect(decoded.insertTextAutomatically)
+    }
+
+    @Test("Legacy toggle activation mode still decodes inside preferences")
+    func legacyToggleActivationDecodes() throws {
+        let legacy = Data(#"{"hotkeyActivationMode":"toggle"}"#.utf8)
+        let decoded = try JSONDecoder().decode(UserPreferences.self, from: legacy)
+        #expect(decoded.hotkeyActivationMode == .doubleTap)
     }
 
     @Test("Saved preferences round-trip")

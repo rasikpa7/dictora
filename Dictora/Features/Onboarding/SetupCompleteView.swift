@@ -16,7 +16,7 @@ struct SetupCompleteView: View {
 
     var body: some View {
         OnboardingScaffold(
-            symbolName: "checkmark.seal",
+            icon: .symbol("checkmark.seal"),
             title: "Dictora is ready.",
             message: platformMessage
         ) {

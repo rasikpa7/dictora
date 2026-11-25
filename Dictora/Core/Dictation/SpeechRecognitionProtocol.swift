@@ -54,9 +54,19 @@ enum SpeechRecognitionError: LocalizedError, Equatable, Sendable {
 /// feeds chunks in — so the same interface fits Apple's `SpeechAnalyzer`, a
 /// future streaming backend, or a fake used in tests.
 protocol SpeechRecognizing: Sendable {
+    /// Downloads the on-device model if needed and loads it into memory, so the
+    /// first dictation after launch starts as fast as every later one.
+    /// `onProgress` receives 0…1 while a download runs, or `nil` when the
+    /// fraction is unknown.
+    func warmUp(locale: Locale, onProgress: @escaping @Sendable (Double?) -> Void) async throws
+
     /// Prepares the recogniser and returns the audio format incoming chunks must
     /// be converted to, or `nil` if any format is acceptable.
     func prepare(locale: Locale) async throws -> AVAudioFormat?
+
+    /// Names and terms the recogniser should favour, such as people and products.
+    /// Applied to the next ``start()``.
+    func setVocabulary(_ terms: [String]) async
 
     /// Begins analysis. The stream finishes after ``finish()`` drains the audio.
     func start() async throws -> AsyncThrowingStream<TranscriptionUpdate, any Error>
@@ -68,6 +78,12 @@ protocol SpeechRecognizing: Sendable {
 
     /// Abandons the session without waiting for final results.
     func cancel() async
+}
+
+extension SpeechRecognizing {
+    func setVocabulary(_ terms: [String]) async {}
+
+    func warmUp(locale: Locale, onProgress: @escaping @Sendable (Double?) -> Void) async throws {}
 }
 
 /// Used when the running OS predates Apple's on-device `SpeechAnalyzer` stack.

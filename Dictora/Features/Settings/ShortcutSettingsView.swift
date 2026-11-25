@@ -8,41 +8,55 @@ import SwiftUI
 struct ShortcutSettingsView: View {
     @Binding var preferences: UserPreferences
 
-    let shortcutDisplayString: String
-    let isShortcutRegistered: Bool
-    let shortcutFailureReason: String?
+    /// What is actually listening, which can differ from the chosen preset when
+    /// the choice could not be registered.
+    let activePreset: ShortcutPreset?
+    let fallbackReason: String?
+    let registrationFailure: String?
     let isAccessibilityGranted: Bool
+    let isInputMonitoringGranted: Bool
+    let onRequestInputMonitoring: () -> Void
     let onRequestAccessibility: () -> Void
+    let onRepairAccessibility: () -> Void
     let onOpenAccessibilitySettings: () -> Void
+
+    private var chosen: ShortcutPreset { preferences.shortcutPreset }
 
     var body: some View {
         Form {
             Section {
                 Toggle("Dictate from anywhere", isOn: $preferences.globalShortcutEnabled)
 
-                LabeledContent("Shortcut") {
-                    Text(shortcutDisplayString)
-                        .font(.body.monospaced())
-                        .foregroundStyle(.secondary)
+                Picker("Shortcut", selection: $preferences.shortcutPreset) {
+                    ForEach(ShortcutPreset.allCases) { preset in
+                        Text("\(preset.displayName)  ·  \(preset.displayString)").tag(preset)
+                    }
                 }
+                .disabled(!preferences.globalShortcutEnabled)
+
+                Text(chosen.detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if preferences.globalShortcutEnabled {
-                    if let shortcutFailureReason {
-                        Label(shortcutFailureReason, systemImage: "exclamationmark.triangle")
-                            .font(.footnote)
+                    statusRow
+                }
+
+                if preferences.globalShortcutEnabled, chosen == .fnGlobe, !isInputMonitoringGranted {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("The Fn key needs Input Monitoring access", systemImage: "exclamationmark.circle.fill")
                             .foregroundStyle(.orange)
-                    } else if isShortcutRegistered {
-                        Label("Registered and listening.", systemImage: "checkmark.circle")
+                        Text("macOS treats watching a lone key as input monitoring. Until it's allowed, Dictora listens on a chord shortcut instead.")
                             .font(.footnote)
-                            .foregroundStyle(.green)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Allow Input Monitoring…", action: onRequestInputMonitoring)
+                            .buttonStyle(.borderedProminent)
                     }
                 }
             } header: {
                 Text("Global shortcut")
-            } footer: {
-                Text("The shortcut is fixed to \(shortcutDisplayString) for now. Customisation is planned.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -52,6 +66,7 @@ struct ShortcutSettingsView: View {
                     }
                 }
                 .pickerStyle(.inline)
+                .disabled(!preferences.globalShortcutEnabled)
 
                 Text(preferences.hotkeyActivationMode.shortDescription)
                     .font(.footnote)
@@ -63,7 +78,7 @@ struct ShortcutSettingsView: View {
             Section {
                 Toggle("Insert text into the focused field", isOn: $preferences.insertTextAutomatically)
                 Text(preferences.insertTextAutomatically
-                    ? "Dictora types the polished text into whichever app you were using."
+                    ? "When you finish speaking, Dictora types the polished text into the field you were using."
                     : "Dictora copies the polished text to your clipboard instead.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -71,6 +86,7 @@ struct ShortcutSettingsView: View {
                 AccessibilityStatusRow(
                     isGranted: isAccessibilityGranted,
                     onRequest: onRequestAccessibility,
+                    onRepair: onRepairAccessibility,
                     onOpenSettings: onOpenAccessibilitySettings
                 )
             } header: {
@@ -79,11 +95,35 @@ struct ShortcutSettingsView: View {
         }
         .formStyle(.grouped)
     }
+
+    @ViewBuilder
+    private var statusRow: some View {
+        if let activePreset, activePreset != chosen {
+            Label(
+                "\(chosen.displayString) isn't available, so \(activePreset.displayString) is listening instead.\(fallbackReason.map { " \($0)" } ?? "")",
+                systemImage: "arrow.turn.down.right"
+            )
+            .font(.footnote)
+            .foregroundStyle(.orange)
+        } else if activePreset != nil {
+            Label("\(chosen.displayString) is registered and listening.", systemImage: "checkmark.circle")
+                .font(.footnote)
+                .foregroundStyle(.green)
+        } else {
+            Label(
+                registrationFailure ?? "No shortcut is listening yet.",
+                systemImage: "exclamationmark.triangle"
+            )
+            .font(.footnote)
+            .foregroundStyle(.orange)
+        }
+    }
 }
 
 private struct AccessibilityStatusRow: View {
     let isGranted: Bool
     let onRequest: () -> Void
+    let onRepair: () -> Void
     let onOpenSettings: () -> Void
 
     var body: some View {
@@ -99,7 +139,12 @@ private struct AccessibilityStatusRow: View {
             }
 
             if !isGranted {
-                Text("Without Accessibility access, Dictora can't type into other apps and will leave the text on your clipboard.")
+                Text("Without it, Dictora can't watch for the Fn key or type into other apps, and results land on your clipboard instead.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("If System Settings already shows Dictora switched on, the entry is stale — it was approved for an earlier build. Repair removes it so you can grant it again.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -107,6 +152,7 @@ private struct AccessibilityStatusRow: View {
                 HStack(spacing: 10) {
                     Button("Grant Access…", action: onRequest)
                         .buttonStyle(.borderedProminent)
+                    Button("Repair", action: onRepair)
                     Button("Open System Settings", action: onOpenSettings)
                 }
             }
@@ -114,17 +160,20 @@ private struct AccessibilityStatusRow: View {
     }
 }
 
-#Preview("Needs access") {
+#Preview("Fell back to a chord") {
     @Previewable @State var preferences = UserPreferences()
     ShortcutSettingsView(
         preferences: $preferences,
-        shortcutDisplayString: "⌥Space",
-        isShortcutRegistered: true,
-        shortcutFailureReason: nil,
+        activePreset: .optionSpace,
+        fallbackReason: "Dictora needs Accessibility access to watch for the Fn key.",
+        registrationFailure: nil,
         isAccessibilityGranted: false,
+        isInputMonitoringGranted: false,
+        onRequestInputMonitoring: {},
         onRequestAccessibility: {},
+        onRepairAccessibility: {},
         onOpenAccessibilitySettings: {}
     )
-    .frame(width: 560, height: 620)
+    .frame(width: 580, height: 680)
 }
 #endif

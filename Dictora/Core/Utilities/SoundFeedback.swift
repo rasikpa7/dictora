@@ -1,37 +1,42 @@
-import AudioToolbox
+import AVFoundation
 import Foundation
 
-/// Short system sounds marking the start and end of dictation.
+/// Short audio cues marking the start, stop and completion of dictation.
 ///
-/// Uses `AudioToolbox` system sound IDs rather than bundled audio files so the
-/// initial project ships no binary assets; swap in custom sounds later by
-/// changing only this type.
-struct SoundFeedback: Sendable {
+/// Prefers bundled Dictora sounds over system alerts so the feedback feels
+/// deliberate and consistent across platforms.
+@MainActor
+final class SoundFeedback {
     enum Cue: Sendable {
         case start
         case stop
         case complete
+
+        fileprivate var resourceName: String {
+            switch self {
+            case .start: "dictora-start"
+            case .stop: "dictora-stop"
+            case .complete: "dictora-complete"
+            }
+        }
     }
+
+    private var player: AVAudioPlayer?
 
     init() {}
 
     func play(_ cue: Cue) {
-        AudioServicesPlaySystemSound(Self.systemSoundID(for: cue))
-    }
-
-    private static func systemSoundID(for cue: Cue) -> SystemSoundID {
-        #if os(iOS)
-        switch cue {
-        case .start: 1113   // begin_record
-        case .stop: 1114    // end_record
-        case .complete: 1057
+        guard let url = Bundle.main.url(forResource: cue.resourceName, withExtension: "wav") else {
+            return
         }
-        #else
-        // macOS has no dedicated recording cues; the generic UI sound is the
-        // least intrusive option available without bundling audio.
-        switch cue {
-        case .start, .stop, .complete: kSystemSoundID_UserPreferredAlert
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.volume = 0.85
+            player.prepareToPlay()
+            self.player = player
+            player.play()
+        } catch {
+            // Silent failure — sound is feedback, not a hard requirement.
         }
-        #endif
     }
 }

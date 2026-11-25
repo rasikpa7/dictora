@@ -31,6 +31,9 @@ struct DictoraMacApp: App {
                 .accessibilityLabel(
                     model.platform.menuBar.accessibilityLabel(for: model.environment.dictation.state)
                 )
+                // The menu bar item exists from launch even when no window opens
+                // (a login item, say), so the shortcut is armed here too.
+                .task { await model.start() }
         }
     }
 }

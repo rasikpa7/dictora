@@ -5,7 +5,7 @@ struct WelcomeView: View {
 
     var body: some View {
         OnboardingScaffold(
-            symbolName: "waveform",
+            icon: .appLogo,
             title: "Welcome to Dictora",
             message: "Speak naturally. Dictora turns your speech into clear, polished text."
         ) {

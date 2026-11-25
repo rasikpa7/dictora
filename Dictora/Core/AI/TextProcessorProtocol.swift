@@ -10,19 +10,30 @@ struct TextProcessingRequest: Equatable, Sendable {
     var customInstructions: String
     var additionalInstructions: String
     var strength: TransformationStrength
+    /// Names and terms the speaker uses, spelled the way they want them.
+    var vocabulary: [String]
+    /// False when the user has switched Claude off, so the request stays on-device.
+    var useCloud: Bool
+    var claudeModel: ClaudeModel
 
     init(
         transcript: String,
         style: WritingStyle,
         customInstructions: String = "",
         additionalInstructions: String = "",
-        strength: TransformationStrength = .default
+        strength: TransformationStrength = .default,
+        vocabulary: [String] = [],
+        useCloud: Bool = true,
+        claudeModel: ClaudeModel = .default
     ) {
         self.transcript = transcript
         self.style = style
         self.customInstructions = customInstructions
         self.additionalInstructions = additionalInstructions
         self.strength = strength
+        self.vocabulary = vocabulary
+        self.useCloud = useCloud
+        self.claudeModel = claudeModel
     }
 
     init(transcript: String, preferences: UserPreferences) {
@@ -31,7 +42,10 @@ struct TextProcessingRequest: Equatable, Sendable {
             style: preferences.selectedWritingStyle,
             customInstructions: preferences.customInstructions,
             additionalInstructions: preferences.additionalInstructions,
-            strength: preferences.transformationStrength
+            strength: preferences.transformationStrength,
+            vocabulary: preferences.vocabularyTerms,
+            useCloud: preferences.useClaude,
+            claudeModel: preferences.claudeModel
         )
     }
 }

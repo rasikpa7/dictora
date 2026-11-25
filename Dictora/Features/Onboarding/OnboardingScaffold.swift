@@ -1,9 +1,19 @@
 import SwiftUI
 
+/// What an onboarding screen shows above its title.
+///
+/// A closed set rather than a generic view builder: only two things ever belong
+/// here, and this keeps the scaffold's generic signature to content and footer.
+enum OnboardingIcon {
+    /// Dictora's own mark. Reserved for the welcome screen.
+    case appLogo
+    case symbol(String)
+}
+
 /// Common chrome for every onboarding screen: icon, title, body, scrolling
 /// content and a pinned footer. Individual steps supply only what differs.
 struct OnboardingScaffold<Content: View, Footer: View>: View {
-    let symbolName: String
+    let icon: OnboardingIcon
     let title: String
     let message: String
     @ViewBuilder var content: Content
@@ -14,10 +24,15 @@ struct OnboardingScaffold<Content: View, Footer: View>: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Image(systemName: symbolName)
-                            .font(.system(size: 34, weight: .light))
-                            .foregroundStyle(Color.accentColor)
-                            .accessibilityHidden(true)
+                        switch icon {
+                        case .appLogo:
+                            AppLogo(size: 64)
+                        case .symbol(let symbolName):
+                            Image(systemName: symbolName)
+                                .font(.system(size: 34, weight: .light))
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityHidden(true)
+                        }
 
                         Text(title)
                             .font(.largeTitle.weight(.semibold))

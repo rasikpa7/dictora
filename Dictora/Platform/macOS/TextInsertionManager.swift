@@ -46,19 +46,30 @@ protocol TextInserting: Sendable {
     func insert(_ text: String, into targetProcessID: pid_t?) async -> TextInsertionOutcome
 }
 
-/// Accessibility-first insertion with a clipboard fallback.
+/// Delivers text into the focused field of the app the user was typing in.
 ///
-/// Strategy order is deliberate: writing through the Accessibility API leaves
-/// the user's clipboard untouched, so it is tried first. Synthetic ⌘V is the
-/// fallback for apps that don't expose an editable AX element (many Electron
-/// and web views). No app-specific special-casing is performed.
+/// Three strategies, tried in order, each only counting as success when it can
+/// be shown to have worked:
+///
+/// 1. **Accessibility** — write the selection directly, then read the field back.
+///    Many apps (browsers, Electron) accept the write and silently ignore it, so
+///    a write that doesn't change the field's value is treated as a failure.
+/// 2. **Paste** — put the text on the clipboard, send ⌘V, and restore everything
+///    that was on the clipboard before, not just plain text.
+/// 3. **Clipboard** — leave the text there and say so.
+///
+/// Nothing is written into the user's document while they are still speaking;
+/// the text goes in once, at the end.
 @MainActor
-struct TextInsertionManager: TextInserting {
+final class TextInsertionManager: TextInserting {
     private let accessibility: AccessibilityManager
     private let logger = Logger(subsystem: DictoraLog.subsystem, category: "TextInsertion")
 
     /// Time for the receiving app to read the pasteboard before it is restored.
-    private static let pasteSettleDelay = Duration.milliseconds(250)
+    private static let pasteSettleDelay = Duration.milliseconds(500)
+    /// Time for an app to apply an Accessibility write before it is read back.
+    private static let verifyDelay = Duration.milliseconds(60)
+    private static let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
 
     init(accessibility: AccessibilityManager) {
         self.accessibility = accessibility
@@ -77,17 +88,53 @@ struct TextInsertionManager: TextInserting {
             )
         }
 
-        if insertUsingAccessibility(text, targetProcessID: targetProcessID) {
+        if await insertUsingAccessibility(text, targetProcessID: targetProcessID) {
+            logger.info("Inserted via Accessibility (verified)")
             return .insertedViaAccessibility
         }
 
         return await pasteUsingClipboard(text)
     }
 
-    // MARK: - Strategy 1: Accessibility
+    // MARK: - Strategy 1: Accessibility, verified
 
-    private func insertUsingAccessibility(_ text: String, targetProcessID: pid_t?) -> Bool {
-        let root = targetProcessID.map(AXUIElementCreateApplication) ?? AXUIElementCreateSystemWide()
+    private func insertUsingAccessibility(_ text: String, targetProcessID: pid_t?) async -> Bool {
+        guard let element = focusedElement(in: targetProcessID), isEditable(element) else {
+            return false
+        }
+        // Without a readable value there is no way to confirm the write, and a
+        // write that silently worked followed by a paste would duplicate text.
+        guard let before = stringValue(of: element) else { return false }
+
+        let status = AXUIElementSetAttributeValue(
+            element,
+            kAXSelectedTextAttribute as CFString,
+            text as CFString
+        )
+        guard status == .success else {
+            logger.debug("Accessibility insertion refused (status \(status.rawValue, privacy: .public))")
+            return false
+        }
+
+        try? await Task.sleep(for: Self.verifyDelay)
+        guard let after = stringValue(of: element), after != before else {
+            logger.notice("Accessibility write reported success but the field didn't change; using paste")
+            return false
+        }
+        return true
+    }
+
+    private func focusedElement(in targetProcessID: pid_t?) -> AXUIElement? {
+        let root: AXUIElement
+        if let targetProcessID {
+            let application = AXUIElementCreateApplication(targetProcessID)
+            // Chromium and Electron apps expose their text fields to
+            // Accessibility only when asked.
+            AXUIElementSetAttributeValue(application, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            root = application
+        } else {
+            root = AXUIElementCreateSystemWide()
+        }
 
         var focused: CFTypeRef?
         let focusStatus = AXUIElementCopyAttributeValue(
@@ -95,26 +142,16 @@ struct TextInsertionManager: TextInserting {
             kAXFocusedUIElementAttribute as CFString,
             &focused
         )
-        guard focusStatus == .success, let focusedValue = focused else { return false }
+        guard focusStatus == .success, let focusedValue = focused else { return nil }
+        guard CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else { return nil }
+        return unsafeDowncast(focusedValue, to: AXUIElement.self)
+    }
 
-        // Safe because kAXFocusedUIElementAttribute is documented to return an
-        // AXUIElement; the CFGetTypeID check keeps that assumption honest.
-        guard CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else { return false }
-        let element = unsafeDowncast(focusedValue, to: AXUIElement.self)
-
-        guard isEditable(element) else { return false }
-
-        // Replacing the selection inserts at the caret when nothing is selected,
-        // which is what a dictation insert should do.
-        let status = AXUIElementSetAttributeValue(
-            element,
-            kAXSelectedTextAttribute as CFString,
-            text as CFString
-        )
-        if status == .success { return true }
-
-        logger.debug("Accessibility insertion unavailable (status \(status.rawValue, privacy: .public))")
-        return false
+    private func stringValue(of element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
+        guard status == .success else { return nil }
+        return value as? String
     }
 
     /// Writing to a read-only element silently succeeds in some apps, so the
@@ -131,35 +168,70 @@ struct TextInsertionManager: TextInserting {
 
     // MARK: - Strategy 2: Clipboard + synthetic paste
 
-    private func pasteUsingClipboard(_ text: String) async -> TextInsertionOutcome {
-        let previousContents = Clipboard.currentString()
-        Clipboard.copy(text)
+    func pasteUsingClipboard(_ text: String) async -> TextInsertionOutcome {
+        let pasteboard = NSPasteboard.general
+        let saved = Self.snapshot(of: pasteboard)
 
-        guard let source = CGEventSource(stateID: .combinedSessionState) else {
-            return .copiedToClipboard(reason: "Dictora couldn't paste for you, so the text is on your clipboard.")
-        }
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        // Tells clipboard managers this is a temporary hand-off, not a copy.
+        pasteboard.setData(Data(), forType: Self.transientType)
+        let ourChangeCount = pasteboard.changeCount
 
-        let virtualKeyV: CGKeyCode = 0x09
-        guard
-            let keyDown = CGEvent(keyboardEventSource: source, virtualKey: virtualKeyV, keyDown: true),
-            let keyUp = CGEvent(keyboardEventSource: source, virtualKey: virtualKeyV, keyDown: false)
+        // A held modifier (hold-to-talk on ⌥Space, say) would turn ⌘V into
+        // ⌥⌘V. Give the user a moment to let go.
+        await waitForModifiersToBeReleased()
+
+        guard let source = CGEventSource(stateID: .hidSystemState),
+              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
         else {
             return .copiedToClipboard(reason: "Dictora couldn't paste for you, so the text is on your clipboard.")
         }
 
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
-        keyDown.post(tap: .cgAnnotatedSessionEventTap)
-        keyUp.post(tap: .cgAnnotatedSessionEventTap)
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+        logger.info("Pasted via clipboard")
 
-        // The synthetic paste is delivered asynchronously; restoring the
-        // clipboard immediately would race the receiving app's read of it.
-        if let previousContents {
-            try? await Task.sleep(for: Self.pasteSettleDelay)
-            Clipboard.copy(previousContents)
+        try? await Task.sleep(for: Self.pasteSettleDelay)
+        // Only put the old contents back if nothing else has touched the
+        // clipboard meanwhile; otherwise the user's newer copy would be lost.
+        if pasteboard.changeCount == ourChangeCount {
+            Self.restore(saved, to: pasteboard)
         }
-
         return .pastedViaClipboard
+    }
+
+    private func waitForModifiersToBeReleased() async {
+        let held: CGEventFlags = [.maskAlternate, .maskControl, .maskShift, .maskSecondaryFn]
+        for _ in 0..<30 {
+            let flags = CGEventSource.flagsState(.combinedSessionState)
+            if flags.intersection(held).isEmpty { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    /// Everything on the pasteboard, as raw data per type, so images, files and
+    /// rich text survive a paste round-trip.
+    private static func snapshot(of pasteboard: NSPasteboard) -> [[(NSPasteboard.PasteboardType, Data)]] {
+        (pasteboard.pasteboardItems ?? []).map { item in
+            item.types.compactMap { type in
+                item.data(forType: type).map { (type, $0) }
+            }
+        }
+    }
+
+    private static func restore(_ saved: [[(NSPasteboard.PasteboardType, Data)]], to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        guard !saved.isEmpty else { return }
+        let items = saved.map { entries -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            for (type, data) in entries { item.setData(data, forType: type) }
+            return item
+        }
+        pasteboard.writeObjects(items)
     }
 }
 #endif

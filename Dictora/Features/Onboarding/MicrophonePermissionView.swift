@@ -16,7 +16,7 @@ struct MicrophonePermissionView: View {
 
     var body: some View {
         OnboardingScaffold(
-            symbolName: "mic.circle",
+            icon: .symbol("mic.circle"),
             title: "Enable your microphone",
             message: "Dictora needs microphone access to hear you, and speech recognition to turn what you say into text. Nothing is recorded or stored."
         ) {

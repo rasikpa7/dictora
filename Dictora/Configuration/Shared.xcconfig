@@ -18,6 +18,18 @@ DICTORA_DISPLAY_NAME = Dictora
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1
 
-// Leave empty for local development. Set to your Apple Developer Team ID to
-// enable automatic signing for device builds and distribution.
-DEVELOPMENT_TEAM =
+// Apple Developer Team ID.
+//
+// This is not optional on macOS. An ad-hoc signature ("-") pins every TCC
+// permission — Accessibility above all — to the binary's exact code hash, so
+// each rebuild silently invalidates the grant: System Settings keeps showing
+// Dictora switched on while AXIsProcessTrusted() returns false. Signing with a
+// real certificate makes the requirement team + bundle ID instead, which
+// survives rebuilds.
+//
+// Change this to your own Team ID. `security find-identity -v -p codesigning`
+// lists the certificates installed on your Mac; note that the ID shown there in
+// brackets is the certificate's user ID, not always the Team ID. To read the
+// Team ID itself, build once and run:
+//   codesign -dv --verbose=2 <path to Dictora.app>
+DEVELOPMENT_TEAM = L65T759ZGZ

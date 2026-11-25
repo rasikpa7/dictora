@@ -3,11 +3,13 @@ import Foundation
 /// Identifies which ``TextProcessorProtocol`` implementation produced a result,
 /// so the UI can be honest about whether on-device AI rewriting actually ran.
 enum TextProcessorKind: String, Codable, Sendable {
+    case claude
     case foundationModel
     case localFallback
 
     var displayName: String {
         switch self {
+        case .claude: "Claude"
         case .foundationModel: "Apple Intelligence"
         case .localFallback: "Basic cleanup"
         }
@@ -23,6 +25,9 @@ struct DictationResult: Identifiable, Equatable, Sendable {
     let strength: TransformationStrength
     let processor: TextProcessorKind
     let createdAt: Date
+    /// Set when something went wrong after the words were captured and Dictora
+    /// delivered the best text it had instead of failing.
+    let warning: String?
 
     init(
         id: UUID = UUID(),
@@ -31,7 +36,8 @@ struct DictationResult: Identifiable, Equatable, Sendable {
         style: WritingStyle,
         strength: TransformationStrength,
         processor: TextProcessorKind,
-        createdAt: Date = .now
+        createdAt: Date = .now,
+        warning: String? = nil
     ) {
         self.id = id
         self.rawTranscript = rawTranscript
@@ -40,6 +46,7 @@ struct DictationResult: Identifiable, Equatable, Sendable {
         self.strength = strength
         self.processor = processor
         self.createdAt = createdAt
+        self.warning = warning
     }
 
     /// True when rewriting actually changed something worth showing the user.

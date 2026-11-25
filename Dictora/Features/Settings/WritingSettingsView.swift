@@ -46,6 +46,17 @@ struct WritingSettingsView: View {
             }
 
             Section {
+                TextEditor(text: $preferences.customVocabulary)
+                    .frame(minHeight: 70)
+                    .font(.body)
+                Text("Names, products and terms to spell exactly, separated by commas or new lines. Dictora already knows Claude, Anthropic and Dictora. This also helps speech recognition hear them correctly.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Names and terms")
+            }
+
+            Section {
                 Picker("Strength", selection: $preferences.transformationStrength) {
                     ForEach(TransformationStrength.allCases) { strength in
                         Text(strength.displayName).tag(strength)

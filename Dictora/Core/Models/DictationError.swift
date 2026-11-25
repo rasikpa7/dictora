@@ -46,7 +46,7 @@ enum DictationError: LocalizedError, Equatable, Sendable {
         case .customInstructionsMissing:
             "Add your own instructions, or pick a different writing style."
         case .nothingHeard:
-            "Try again and speak a little closer to the microphone."
+            "Try again, speak a little louder, and stay close to the microphone."
         case .audioCaptureFailed(let detail):
             detail
         case .transcriptionFailed(let detail):

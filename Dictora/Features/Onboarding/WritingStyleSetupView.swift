@@ -7,7 +7,7 @@ struct WritingStyleSetupView: View {
 
     var body: some View {
         OnboardingScaffold(
-            symbolName: "text.badge.checkmark",
+            icon: .symbol("text.badge.checkmark"),
             title: "How should Dictora handle your dictation?",
             message: "Pick a starting point. You can change this at any time in Settings."
         ) {

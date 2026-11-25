@@ -43,11 +43,22 @@ enum DictationState: Equatable, Sendable {
         switch self {
         case .idle: "Ready"
         case .requestingPermission: "Checking permissions…"
-        case .listening: "Listening…"
+        case .listening: "Capturing…"
         case .transcribing: "Transcribing…"
-        case .processing: "Processing…"
+        case .processing: "Rephrasing…"
         case .completed: "Done"
         case .failed: "Failed"
+        }
+    }
+
+    /// Placeholder written into the focused field while a system-wide session
+    /// is in progress. Replaced by the polished result when delivery finishes.
+    var fieldPlaceholderText: String? {
+        switch self {
+        case .listening: "Capturing…"
+        case .transcribing: "Transcribing…"
+        case .processing: "Rephrasing…"
+        case .idle, .requestingPermission, .completed, .failed: nil
         }
     }
 }

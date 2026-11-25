@@ -17,12 +17,14 @@ xcuserdata/
 build/
 .build/
 DerivedData/
+dist/
 *.hmap
 *.ipa
 *.dSYM.zip
 *.dSYM
 *.xcarchive
 *.xcresult
+*.dmg
 
 # Swift Package Manager
 .swiftpm/
@@ -46,3 +48,11 @@ Dictora.xcodeproj/
 #   Dictora/Configuration/*.entitlements
 #   Dictora/Resources/Assets.xcassets
 #   Dictora/Resources/Localizable.xcstrings
+
+# Local build output
+.derivedData/
+
+# Firebase
+firebase-debug.log
+firebase-debug.*.log
+.firebase/

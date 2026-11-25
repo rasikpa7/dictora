@@ -17,13 +17,21 @@ struct UserPreferences: Codable, Equatable, Sendable {
     var showFloatingIndicator: Bool
     /// macOS only. Not wired to `SMAppService` yet — see `MacPlatformServices`.
     var launchAtLogin: Bool
-    /// macOS only. Whether Option + Space triggers dictation from any app.
+    /// macOS only. Whether a global shortcut triggers dictation from any app.
     var globalShortcutEnabled: Bool
-    /// macOS only. Tap-to-toggle versus hold-to-talk.
+    /// macOS only. Which global shortcut starts dictation.
+    var shortcutPreset: ShortcutPreset
+    /// macOS only. Double-tap to start (tap once to stop) versus hold-to-talk.
     var hotkeyActivationMode: HotkeyActivationMode
     /// macOS only. When false, shortcut-triggered results are copied to the
     /// clipboard instead of being typed into the focused field.
     var insertTextAutomatically: Bool
+    /// Use Claude for rewriting when an API key is connected. The key itself
+    /// lives in the Keychain, never here.
+    var useClaude: Bool
+    var claudeModel: ClaudeModel
+    /// Names and terms to spell exactly, one per line or comma-separated.
+    var customVocabulary: String
 
     init(
         hasCompletedOnboarding: Bool = false,
@@ -35,8 +43,12 @@ struct UserPreferences: Codable, Equatable, Sendable {
         showFloatingIndicator: Bool = true,
         launchAtLogin: Bool = false,
         globalShortcutEnabled: Bool = true,
+        shortcutPreset: ShortcutPreset = .default,
         hotkeyActivationMode: HotkeyActivationMode = .default,
-        insertTextAutomatically: Bool = true
+        insertTextAutomatically: Bool = true,
+        useClaude: Bool = true,
+        claudeModel: ClaudeModel = .default,
+        customVocabulary: String = ""
     ) {
         self.hasCompletedOnboarding = hasCompletedOnboarding
         self.selectedWritingStyle = selectedWritingStyle
@@ -47,8 +59,12 @@ struct UserPreferences: Codable, Equatable, Sendable {
         self.showFloatingIndicator = showFloatingIndicator
         self.launchAtLogin = launchAtLogin
         self.globalShortcutEnabled = globalShortcutEnabled
+        self.shortcutPreset = shortcutPreset
         self.hotkeyActivationMode = hotkeyActivationMode
         self.insertTextAutomatically = insertTextAutomatically
+        self.useClaude = useClaude
+        self.claudeModel = claudeModel
+        self.customVocabulary = customVocabulary
     }
 
     /// Decoding tolerates preferences written by an older build that lacked a key.
@@ -67,8 +83,25 @@ struct UserPreferences: Codable, Equatable, Sendable {
         showFloatingIndicator = value(.showFloatingIndicator, defaults.showFloatingIndicator)
         launchAtLogin = value(.launchAtLogin, defaults.launchAtLogin)
         globalShortcutEnabled = value(.globalShortcutEnabled, defaults.globalShortcutEnabled)
+        shortcutPreset = value(.shortcutPreset, defaults.shortcutPreset)
         hotkeyActivationMode = value(.hotkeyActivationMode, defaults.hotkeyActivationMode)
         insertTextAutomatically = value(.insertTextAutomatically, defaults.insertTextAutomatically)
+        useClaude = value(.useClaude, defaults.useClaude)
+        claudeModel = value(.claudeModel, defaults.claudeModel)
+        customVocabulary = value(.customVocabulary, defaults.customVocabulary)
+    }
+
+    /// Words Dictora always knows how to spell, plus the user's own.
+    static let builtInVocabulary = ["Claude", "Anthropic", "Dictora"]
+
+    /// The terms handed to the recogniser and the rewriter.
+    var vocabularyTerms: [String] {
+        let custom = customVocabulary
+            .components(separatedBy: CharacterSet(charactersIn: ",\n;"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var seen = Set<String>()
+        return (Self.builtInVocabulary + custom).filter { seen.insert($0.lowercased()).inserted }
     }
 
     /// The style instruction with the user's own custom text already resolved.

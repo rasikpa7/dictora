@@ -12,13 +12,20 @@ final class AppEnvironment {
     let appState: DictoraAppState
     let dictation: DictationManager
     let textProcessing: TextProcessingService
+    let clipboardRewriter: ClipboardRewriter
+    let claudeAccount: ClaudeAccount
 
     init(container: DependencyContainer) {
         let appState = DictoraAppState(store: container.preferencesStore)
-        let textProcessing = TextProcessingService(primary: container.textProcessor)
+        let textProcessing = TextProcessingService(
+            primary: container.textProcessor,
+            cloud: container.cloudProcessor
+        )
 
         self.appState = appState
         self.textProcessing = textProcessing
+        self.claudeAccount = container.claudeAccount
+        self.clipboardRewriter = ClipboardRewriter(textProcessing: textProcessing)
         self.dictation = DictationManager(
             audioCapture: container.audioCapture,
             recognizer: container.speechRecognizer,

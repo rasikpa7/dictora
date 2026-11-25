@@ -9,6 +9,7 @@ import SwiftUI
 struct MacSettingsView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(MacPlatformServices.self) private var platform
+    @Environment(SystemDictationCoordinator.self) private var coordinator
 
     var body: some View {
         @Bindable var appState = environment.appState
@@ -20,14 +21,28 @@ struct MacSettingsView: View {
             Tab("Writing", systemImage: "text.badge.checkmark") {
                 WritingSettingsView(preferences: $appState.preferences)
             }
+            Tab("Claude", systemImage: "sparkles") {
+                ClaudeSettingsView(
+                    preferences: $appState.preferences,
+                    status: environment.claudeAccount.status,
+                    hasKey: environment.claudeAccount.hasKey,
+                    lastIssue: environment.textProcessing.lastCloudIssue,
+                    onConnect: { key in Task { await environment.claudeAccount.connect(key: key) } },
+                    onTest: { Task { await environment.claudeAccount.testSavedKey() } },
+                    onDisconnect: { environment.claudeAccount.disconnect() }
+                )
+            }
             Tab("Anywhere", systemImage: "keyboard") {
                 ShortcutSettingsView(
                     preferences: $appState.preferences,
-                    shortcutDisplayString: HotkeyShortcut.optionSpace.displayString,
-                    isShortcutRegistered: platform.hotkey.state.isActive,
-                    shortcutFailureReason: shortcutFailureReason,
+                    activePreset: coordinator.activePreset,
+                    fallbackReason: coordinator.shortcutFallbackReason,
+                    registrationFailure: platform.hotkey.state.failureReason,
                     isAccessibilityGranted: platform.accessibility.access.isGranted,
+                    isInputMonitoringGranted: platform.accessibility.inputMonitoringGranted,
+                    onRequestInputMonitoring: { platform.accessibility.requestInputMonitoring() },
                     onRequestAccessibility: { platform.accessibility.requestAccess() },
+                    onRepairAccessibility: { platform.accessibility.resetPermission() },
                     onOpenAccessibilitySettings: { platform.accessibility.openSystemSettings() }
                 )
             }
@@ -45,11 +60,6 @@ struct MacSettingsView: View {
             await environment.textProcessing.refreshAvailability()
             platform.accessibility.refresh()
         }
-    }
-
-    private var shortcutFailureReason: String? {
-        if case .failed(let reason) = platform.hotkey.state { return reason }
-        return nil
     }
 }
 

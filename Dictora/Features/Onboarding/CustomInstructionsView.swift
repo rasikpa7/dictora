@@ -28,7 +28,7 @@ struct CustomInstructionsView: View {
 
     var body: some View {
         OnboardingScaffold(
-            symbolName: "text.append",
+            icon: .symbol("text.append"),
             title: "Additional instructions",
             message: "Tell Dictora anything it should always do with your dictation. This applies on top of your writing style."
         ) {

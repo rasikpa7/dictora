@@ -12,19 +12,25 @@ struct DependencyContainer {
     let audioCapture: any AudioCapturing
     let speechRecognizer: any SpeechRecognizing
     let textProcessor: any TextProcessorProtocol
+    let cloudProcessor: (any TextProcessorProtocol)?
+    let claudeAccount: ClaudeAccount
 
     init(
         preferencesStore: any PreferencesStoring,
         permissions: any DictationPermissionsProviding,
         audioCapture: any AudioCapturing,
         speechRecognizer: any SpeechRecognizing,
-        textProcessor: any TextProcessorProtocol
+        textProcessor: any TextProcessorProtocol,
+        cloudProcessor: (any TextProcessorProtocol)? = nil,
+        claudeAccount: ClaudeAccount = ClaudeAccount()
     ) {
         self.preferencesStore = preferencesStore
         self.permissions = permissions
         self.audioCapture = audioCapture
         self.speechRecognizer = speechRecognizer
         self.textProcessor = textProcessor
+        self.cloudProcessor = cloudProcessor
+        self.claudeAccount = claudeAccount
     }
 
     static func live() -> DependencyContainer {
@@ -33,7 +39,8 @@ struct DependencyContainer {
             permissions: SystemDictationPermissions(),
             audioCapture: AudioCaptureService(),
             speechRecognizer: SpeechRecognizerFactory.makeDefault(),
-            textProcessor: makeTextProcessor()
+            textProcessor: makeTextProcessor(),
+            cloudProcessor: ClaudeTextProcessor()
         )
     }
 

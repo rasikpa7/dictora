@@ -36,7 +36,7 @@ struct DictationView: View {
 
                 if !dictation.transcript.isEmpty, dictation.result == nil {
                     TranscriptView(
-                        title: dictation.state.isCapturing ? "Listening" : "You said",
+                        title: dictation.state.isCapturing ? "Capturing" : "You said",
                         text: dictation.transcript.displayText,
                         symbolName: "waveform"
                     )
@@ -64,11 +64,8 @@ private struct DictationHeader: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: "waveform")
-                    .font(.title2)
-                    .foregroundStyle(Color.accentColor)
-                    .accessibilityHidden(true)
+            HStack(spacing: 10) {
+                AppLogo(size: 32)
                 Text("Dictora")
                     .font(.largeTitle.weight(.semibold))
             }
@@ -103,7 +100,7 @@ private struct ResultSection: View {
             )
 
             HStack(spacing: 6) {
-                Image(systemName: result.processor == .foundationModel ? "apple.intelligence" : "textformat.abc")
+                Image(systemName: { switch result.processor { case .claude: "sparkles"; case .foundationModel: "apple.intelligence"; case .localFallback: "textformat.abc" } }())
                     .accessibilityHidden(true)
                 Text("Polished with \(result.processor.displayName)")
                 ShareLink(item: result.polishedText) {

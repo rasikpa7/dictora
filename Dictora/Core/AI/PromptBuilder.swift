@@ -35,6 +35,19 @@ struct PromptBuilder: Sendable {
             sections.append("Additional instructions from the user:\n\(additional)")
         }
 
+        // Spoken text is full of repairs. Applied for every style, because the
+        // speaker's final intent is what they want on the page.
+        sections.append(
+            "Speech repairs:\n- When the speaker corrects themselves (\"sorry, not that, this\", \"I mean\", \"no wait\", \"scratch that\"), keep only the final intended wording and drop the abandoned words and the correction phrase.\n- Drop false starts and repeated words.\n- Where a word makes no sense in context, replace it with the similar-sounding word the speaker most likely said."
+        )
+
+        if !request.vocabulary.isEmpty {
+            sections.append(
+                "The speaker's vocabulary. Spell these exactly, and use them when the transcript contains a word that sounds like one of them (speech recognition often mishears names):\n"
+                    + request.vocabulary.map { "- \($0)" }.joined(separator: "\n")
+            )
+        }
+
         sections.append(
             "Rules that always apply:\n"
                 + Self.invariantRules.map { "- \($0)" }.joined(separator: "\n")

@@ -94,7 +94,7 @@ Dictora/
 
 ```
 AudioCaptureService          SpeechRecognitionService        TextProcessingService
-  AVAudioEngine tap    →       SpeechAnalyzer +          →     FoundationModelTextProcessor
+  AVCaptureSession     →       SpeechAnalyzer +          →     FoundationModelTextProcessor
   + format conversion          SpeechTranscriber               ↓ (unavailable or failed)
         ↓                            ↓                         LocalFallbackTextProcessor
    AsyncStream<AudioChunk>    AsyncThrowingStream<TranscriptionUpdate>
@@ -105,10 +105,40 @@ AudioCaptureService          SpeechRecognitionService        TextProcessingServi
 `DictationState` moves through `idle → requestingPermission → listening → transcribing →
 processing → completed`, with `failed(DictationError)` reachable from any stage.
 
+### Why capture uses `AVCaptureSession`, not `AVAudioEngine`
+
+Starting an `AVAudioEngine` runs its entire graph, output node included, so it opens the
+*speakers* as well as the microphone — even though Dictora never plays anything through it.
+Holding the output device open forces the system to re-negotiate it, and other audio audibly
+degrades: music drops into the thin, processed sound you get during a call.
+
+`AVCaptureSession` is capture-only and leaves the output device alone. The difference is
+measurable, and `Scripts/verify-audio-capture.swift` measures it:
+
+```
+AVAudioEngine     mic:OPEN  speakers:OPEN     ← degrades other audio
+AVCaptureSession  mic:OPEN  speakers:closed
+```
+
+The trade-off is that a capture session does not report its audio format until buffers start
+arriving, so `BufferConverter` is built lazily on the first buffer rather than up front.
+
+### Choosing a shortcut
+
+`ShortcutPreset` offers a fixed list rather than a free-form recorder, because the options are
+not equivalent. Fn / Globe is the default and feels best — one key, nothing to reach for — but a
+lone modifier cannot be registered as a system hotkey, so it has to be watched through a
+`CGEvent` tap, and that needs Accessibility. Every other preset is an ordinary chord registered
+through Carbon, which works with no permissions at all.
+
+When the chosen shortcut cannot be registered, `SystemDictationCoordinator` falls back to
+⌥Space rather than leaving the user with nothing, and both Settings and the main window say
+which shortcut is actually listening and why it differs.
+
 ### Dictating into other apps (macOS)
 
 ```
-Option + Space  →  remember the frontmost app (ActiveApplicationManager)
+Shortcut        →  remember the frontmost app (ActiveApplicationManager)
                 →  dictate (the pipeline above), floating overlay follows the state
                 →  TextInsertionManager:  Accessibility write
                                           ↓ element not editable / not writable
@@ -155,7 +185,7 @@ field. Dictora does not pretend otherwise.
 | Settings + onboarding | Yes | Yes |
 | Copy / share result | Yes | Yes |
 | Menu bar app (`MenuBarExtra`) | Yes | N/A |
-| Global keyboard shortcut | Yes — Option + Space, tap or hold | Not possible |
+| Global keyboard shortcut | Yes — five presets, Fn by default, hold or double-tap | Not possible |
 | Floating listening overlay | Yes | N/A |
 | Foreground-app detection | Yes (`NSWorkspace`) | Not possible |
 | Insert into another app's focused field | Yes — Accessibility, clipboard fallback | **Not possible** |
@@ -201,32 +231,109 @@ unavailable, the app reports the reason in Settings › Privacy and uses the loc
 
 ## Running
 
+### Prerequisites
+
+- macOS 26 with [Xcode](https://developer.apple.com/xcode/) 26+
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
+- An Apple Development certificate and your Team ID in
+  `Dictora/Configuration/Shared.xcconfig` (`DEVELOPMENT_TEAM`) — see
+  [Things you must configure manually in Xcode](#things-you-must-configure-manually-in-xcode)
+
+### First-time setup
+
 ```bash
-# 1. Generate the Xcode project (project.yml is the source of truth)
+# Generate Dictora.xcodeproj from project.yml (the source of truth)
 xcodegen generate
-
-# 2. Open it
-open Dictora.xcodeproj
 ```
-
-3. Choose the **DictoraMac** or **DictoraiOS** scheme.
-4. Press Run.
 
 `Dictora.xcodeproj` is gitignored because it is generated. Re-run `xcodegen generate` after
 pulling changes that touch `project.yml` or add files.
 
-### From the command line
+### Run from Xcode
+
+```bash
+open Dictora.xcodeproj
+```
+
+1. Select the **DictoraMac** scheme (menu bar app + main window) or **DictoraiOS**.
+2. Choose a destination: **My Mac** for macOS, or an iPhone simulator / device for iOS.
+3. Press **⌘R** (Product › Run).
+
+On first launch, complete onboarding and grant Microphone, Speech Recognition, and (on macOS)
+Accessibility if you want Dictora to type into other apps.
+
+### Debug logs
+
+Dictora logs to Apple’s unified logging under subsystem **`com.dictora.app`**.
+
+**Live stream in Terminal** (best while reproducing a bug):
+
+```bash
+log stream --predicate 'subsystem == "com.dictora.app"' --level debug --style compact
+```
+
+Useful categories you’ll see: `DictationManager`, `AudioCapture`, `SpeechRecognition`,
+`SystemDictation`, `TextInsertion`.
+
+**Console.app**
+
+1. Open **Console** (Spotlight → Console).
+2. Select your Mac in the sidebar.
+3. In the search field, enter: `subsystem:com.dictora.app`
+4. Enable **Action › Include Debug Messages** and **Include Info Messages**.
+5. Start/stop dictation and watch session lines (`Session … listening`, `audio chunks=…`,
+   `raw transcript`, `completed → …`).
+
+**From Xcode**
+
+1. Run **DictoraMac** with **⌘R**.
+2. Open the **Debug area** (⌘⇧Y) — some `Logger` lines also appear there when attached.
+3. For the full stream, keep the `log stream` command above running in a side terminal.
+
+### Build and run from the command line
+
+**macOS**
+
+```bash
+xcodegen generate
+
+xcodebuild -project Dictora.xcodeproj -scheme DictoraMac \
+  -configuration Debug \
+  -destination 'platform=macOS' \
+  -derivedDataPath ./.derivedData \
+  build
+
+open ./.derivedData/Build/Products/Debug/Dictora.app
+```
+
+**iOS Simulator**
+
+```bash
+xcodegen generate
+
+xcodebuild -project Dictora.xcodeproj -scheme DictoraiOS \
+  -configuration Debug \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -derivedDataPath ./.derivedData \
+  build
+
+xcrun simctl boot "iPhone 17 Pro" 2>/dev/null || true
+open -a Simulator
+xcrun simctl install booted ./.derivedData/Build/Products/Debug-iphonesimulator/Dictora.app
+xcrun simctl launch booted com.dictora.app.ios
+```
+
+`.derivedData/` is a local build folder (safe to delete). Omit `-derivedDataPath` to use
+Xcode’s default DerivedData location instead.
+
+### Tests
 
 ```bash
 xcodebuild -project Dictora.xcodeproj -scheme DictoraMac \
-  -destination 'platform=macOS,arch=arm64' build
-
-xcodebuild -project Dictora.xcodeproj -scheme DictoraiOS \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
-
-xcodebuild -project Dictora.xcodeproj -scheme DictoraMac \
-  -destination 'platform=macOS,arch=arm64' test
+  -destination 'platform=macOS' test
 ```
+
+See [Tests](#tests) for more detail.
 
 ---
 
@@ -256,7 +363,8 @@ left on the clipboard with an explanation.
 - Transformation strength (Minimal / Balanced / Rewrite).
 - Preferences persisted to `UserDefaults` as a single JSON blob, tolerant of missing keys and
   corrupt data.
-- Microphone capture via `AVAudioEngine`, with sample-rate conversion to the transcriber's format.
+- Microphone capture via `AVCaptureSession`, with sample-rate conversion to the transcriber's
+  format.
 - Streaming transcription via `SpeechAnalyzer` + `SpeechTranscriber`, including on-device model
   asset download for the user's locale, and live volatile results.
 - Dictation state machine orchestrating capture → recognition → rewriting → result.
@@ -272,10 +380,12 @@ left on the clipboard with an explanation.
 
 **Dictate anywhere on the Mac (Phase 2):**
 
-- Global Option + Space shortcut via Carbon's `RegisterEventHotKey`, reporting conflicts with
-  other apps rather than failing silently. Works with Dictora's window closed.
-- Both activation modes: tap to start and stop, or hold to talk. Switching mode in Settings
-  re-registers the shortcut automatically.
+- Five preset global shortcuts, defaulting to Fn / Globe, with automatic fallback to ⌥Space when
+  the chosen one cannot be registered. Works with Dictora's window closed.
+- Both activation modes: double-tap to start (single tap to stop while listening), or hold to talk. Switching mode or preset
+  in Settings re-registers the shortcut automatically.
+- Rephrase text you already have: pick a style and tone, rewrite whatever is on the clipboard,
+  either from the window's Rephrase tab or straight from the menu bar.
 - Floating non-activating `NSPanel` overlay following the dictation state, positioned on the
   display the pointer is on, and reporting the delivery outcome when finished.
 - Accessibility text insertion into the focused field of the app you dictated from, checking the
@@ -284,7 +394,7 @@ left on the clipboard with an explanation.
   your previous clipboard contents afterwards.
 - Graceful degradation: without Accessibility permission the text is left on the clipboard with
   an explanation, and the main window offers to request access.
-- 41 unit tests on macOS (37 on iOS, which skips the macOS-only suites).
+- 59 unit tests on macOS (50 on iOS, which skips the macOS-only suites).
 
 ### Scaffolded
 
@@ -295,7 +405,7 @@ left on the clipboard with an explanation.
 
 ### Future
 
-- Customisable shortcut (currently fixed to Option + Space).
+- Free-form shortcut recorder, beyond the five presets.
 - Accessibility step in macOS onboarding, rather than only the in-app prompt.
 - iOS custom keyboard and Share Extension.
 - Per-application writing styles, personal dictionary, smarter developer mode.
@@ -305,10 +415,29 @@ left on the clipboard with an explanation.
 
 ## Things you must configure manually in Xcode
 
-1. **Signing.** `DEVELOPMENT_TEAM` is empty in `Dictora/Configuration/Shared.xcconfig`. macOS
-   builds use ad-hoc signing (`CODE_SIGN_IDENTITY = "-"`), which runs locally but cannot be
-   distributed. iOS uses automatic signing and needs a team before it will run on a device
-   (the Simulator does not).
+1. **The macOS app must be signed with a real certificate, not ad-hoc.**
+   `DEVELOPMENT_TEAM` in `Dictora/Configuration/Shared.xcconfig` is not a nicety you can leave
+   blank — change it to your own Team ID. iOS uses automatic signing and needs the same team
+   before it will run on a device (the Simulator does not).
+
+   macOS records an Accessibility grant against the app's *code-signing
+   requirement*. For an ad-hoc signature that requirement is the binary's code
+   hash, so every rebuild invalidates the grant — and does so invisibly: System
+   Settings still lists Dictora with its switch on, while `AXIsProcessTrusted()`
+   returns false, which in turn kills the Fn key and text insertion. You can see
+   which kind you have:
+
+   ```bash
+   codesign -d -r- /path/to/Dictora.app
+   # ad-hoc  → designated => cdhash H"…"                 ← grant dies on rebuild
+   # signed  → designated => identifier "com.dictora.app" and … certificate …
+   ```
+
+   With a certificate the requirement is identity-based, so the grant survives
+   rebuilds. `Scripts/make-dmg.sh` refuses to package an ad-hoc build for this
+   reason. If a stale grant is already recorded, the switch cannot repair it —
+   the entry has to be removed first, which is what the **Repair** button in
+   Dictora does (`tccutil reset Accessibility com.dictora.app`).
 
 2. **The App Sandbox is off on macOS, deliberately.**
    A sandboxed app cannot use the Accessibility API on another process, so typing into another
@@ -329,15 +458,25 @@ left on the clipboard with an explanation.
    `com.apple.security.app-sandbox` — everything except `TextInsertionManager`'s Accessibility
    path keeps working, and that path already degrades to the clipboard with a clear explanation.
 
-3. **App icons.** `Assets.xcassets/AppIcon.appiconset` has the correct slots but **no artwork**.
-   Supply PNGs for:
+3. **App icon.** Artwork is in place and generated from a single source. If you replace it with
+   final brand artwork, drop a 1024×1024 full-bleed square PNG at `Design/AppIcon-master.png`
+   and re-run:
 
-   | Platform | Sizes |
-   | --- | --- |
-   | iOS | 1024×1024 (single universal size) |
-   | macOS | 16, 32, 128, 256, 512 pt — each at @1x and @2x (so 16×16 through 1024×1024) |
+   ```bash
+   swift Scripts/generate-app-icon.swift
+   ```
 
-   `AccentColor.colorset` already has light and dark variants; replace with brand colours.
+   That renders every catalog slot and rewrites both `Contents.json` files, so the sizes never
+   drift out of sync with the artwork. It produces:
+
+   - `AppIcon.appiconset` — the iOS 1024 (opaque, no alpha channel, which App Store validation
+     requires) plus the ten macOS slots, each clipped to Apple's icon grid: an 824/1024 body on
+     a superellipse, leaving the transparent margin the Dock uses for optical sizing.
+   - `Logo.imageset` — the same mark at 1x/2x/3x for use inside the app, via the shared
+     `AppLogo` view in onboarding and the window headers.
+
+   `AccentColor.colorset` carries light and dark variants tuned to the icon's indigo; update
+   both if you change the artwork.
 
 4. **Menu-bar-only mode.** `LSUIElement` is `false` in `Info-macOS.plist`, so Dictora has a Dock
    icon and a main window alongside its menu bar item. Set it to `true` for a pure menu bar app.

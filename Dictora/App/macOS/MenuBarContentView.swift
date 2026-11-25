@@ -10,7 +10,7 @@ struct MenuBarContentView: View {
     private var dictation: DictationManager { environment.dictation }
 
     var body: some View {
-        Text("Dictora — \(dictation.state.statusText)")
+        Text("Dictora — \(dictation.speechModel.note ?? dictation.state.statusText)")
 
         Divider()
 
@@ -22,9 +22,20 @@ struct MenuBarContentView: View {
         .disabled(!dictation.state.canStart && !dictation.state.isCapturing)
 
         if environment.appState.preferences.globalShortcutEnabled,
-           platform.hotkey.state.isActive {
-            Text("Anywhere: \(HotkeyShortcut.optionSpace.displayString)")
+           let active = coordinator.activePreset {
+            Text("Anywhere: \(active.displayString)")
         }
+
+        // Each style rephrases the clipboard directly, so the common case —
+        // "make this text sound different" — is one menu away from anywhere.
+        Menu("Rephrase Clipboard") {
+            ForEach(WritingStyle.allCases) { style in
+                Button(style.displayName) {
+                    coordinator.rephraseClipboard(as: style)
+                }
+            }
+        }
+        .disabled(environment.clipboardRewriter.clipboardPreview == nil)
 
         Menu("Writing Style") {
             ForEach(WritingStyle.allCases) { style in
@@ -40,9 +51,15 @@ struct MenuBarContentView: View {
             }
         }
 
-        if let result = dictation.result {
-            Button("Copy Last Result") {
-                Clipboard.copy(result.polishedText)
+        // Everything recently dictated stays one click away, so a result that
+        // landed in the wrong place is never lost.
+        if !dictation.history.isEmpty {
+            Menu("Recent Dictations") {
+                ForEach(dictation.history.prefix(10)) { entry in
+                    Button(Self.menuTitle(for: entry.polishedText)) {
+                        Clipboard.copy(entry.polishedText)
+                    }
+                }
             }
         }
 
@@ -63,6 +80,11 @@ struct MenuBarContentView: View {
             platform.menuBar.quit()
         }
         .keyboardShortcut("q", modifiers: .command)
+    }
+
+    private static func menuTitle(for text: String) -> String {
+        let singleLine = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+        return singleLine.count > 48 ? String(singleLine.prefix(47)) + "…" : singleLine
     }
 }
 #endif

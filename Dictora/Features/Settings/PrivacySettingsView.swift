@@ -17,7 +17,7 @@ struct PrivacySettingsView: View {
             Section {
                 Text("Dictora is designed to process your voice and writing locally whenever supported by your device.")
                     .font(.callout)
-                Text("Dictora does not include any analytics, accounts, or third-party cloud services. Speech recognition uses Apple's on-device Speech framework, and rewriting uses Apple's on-device model when your device supports it.")
+                Text("Dictora has no analytics or accounts. Speech recognition always uses Apple's on-device Speech framework. Rewriting uses Apple's on-device model when your device supports it, unless you connect your own Claude API key in Settings. In that case only the dictated text (never your audio) is sent to Anthropic to be rewritten.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } header: {
