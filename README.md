@@ -2,6 +2,10 @@
 
 AI-assisted dictation for macOS and iOS, built entirely on Apple's native frameworks.
 
+**Website and download: https://dictora-mac-site.web.app**
+
+The marketing site lives in [`Website/`](Website) (Firebase Hosting); see [`docs/website.md`](docs/website.md) for how to deploy it and ship a new download.
+
 ---
 
 ## Product overview
